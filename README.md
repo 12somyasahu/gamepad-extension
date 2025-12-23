@@ -91,7 +91,7 @@ Contributions are welcome! Feel free to:
 ⭐ Star this project
 📝 Development
 # Clone the repository
-git clone https://github.com/122somyasahu/gamepad-extension.git
+git clone https://github.com/12somyasahu/gamepad-extension.git
 
 # Make your changes to the files
 
