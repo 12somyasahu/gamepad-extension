@@ -33,7 +33,7 @@ L3 (Left Click)	Right Click
 
 Download or Clone this repository
 
-git clone https://github.com/YOUR-USERNAME/gamepad-browser-controller.git
+git clone https://github.com/12somyasahu/gamepad-extension.git
 Open Chrome Extensions
 
 Navigate to chrome://extensions/
