@@ -1,389 +1,399 @@
-// Content script that runs on all pages
-// Handles gamepad input and controls media elements
+// ==========================================
+// GAMEPAD BROWSER CONTROLLER - CONTENT SCRIPT
+// ==========================================
 
-let lastButtonStates = {};
-let scrollSpeed = 30;
-let isEnabled = true;
-let mouseX = window.innerWidth / 2;
-let mouseY = window.innerHeight / 2;
-let cursorSpeed = 15;
-let currentPlaybackSpeed = 1.0; // Track current video speed
-const triggerDeadzone = 0.1; // Ignore tiny trigger movements
-// Button mapping - can be customized
-const buttonMap = {
-  0: 'playPause',      // A/Cross
-  1: 'goBack',     // B/Circle
-  2: 'mute',           // X/Square
-  3: 'fullscreen',     // Y/Triangle
-  12: 'volumeUp',      // D-Pad Up
-  13: 'volumeDown',    // D-Pad Down
-  14: 'rewind',        // D-Pad Left
-  15: 'forward',       // D-Pad Right
-  4: 'previousVideo',  // LB
-  5: 'nextVideo',      // RB
-11: 'rightClick',    // R3 (Right stick click) - right click
-  10: 'leftClick',     // L3 (Left stick click) - left click
+// State management
+let state = {
+  enabled: true,
+  lastButtons: {},
+  mouseX: window.innerWidth / 2,
+  mouseY: window.innerHeight / 2,
+  playbackSpeed: 1.0
 };
 
-// Create custom cursor
+// Constants
+const CONFIG = {
+  scrollSpeed: 30,
+  cursorSpeed: 15,
+  stickDeadzone: 0.15,
+  triggerDeadzone: 0.1
+};
+
+// Default button mapping
+const DEFAULT_MAP = {
+  0: 'playPause',    // A
+  1: 'goBack',       // B
+  2: 'mute',         // X
+  3: 'fullscreen',   // Y
+  4: 'previousVideo',// LB
+  5: 'nextVideo',    // RB
+  10: 'leftClick',   // L3
+  11: 'rightClick',  // R3
+  12: 'volumeUp',    // D-Up
+  13: 'volumeDown',  // D-Down
+  14: 'rewind',      // D-Left
+  15: 'forward'      // D-Right
+};
+
+let customMap = {};
+
+// ==========================================
+// CURSOR MANAGEMENT
+// ==========================================
+
 const cursor = document.createElement('div');
-cursor.id = 'gamepad-cursor';
 cursor.style.cssText = `
   position: fixed;
   width: 20px;
   height: 20px;
-  background: radial-gradient(circle, rgba(255,255,255,0.9) 0%, rgba(100,150,255,0.8) 100%);
+  background: radial-gradient(circle, #fff 0%, #64f 100%);
   border: 3px solid rgba(255,255,255,0.9);
   border-radius: 50%;
   pointer-events: none;
-  z-index: 999999;
+  z-index: 2147483647;
   transform: translate(-50%, -50%);
-  box-shadow: 0 0 20px rgba(100,150,255,0.8), 0 0 40px rgba(100,150,255,0.4);
-  display: none;
-  transition: transform 0.1s;
+  box-shadow: 0 0 20px rgba(100,100,255,0.8);
+  display: block;
+  transition: transform 0.1s ease;
 `;
-document.body.appendChild(cursor);
+document.body?.appendChild(cursor);
 
-// Update cursor position
 function updateCursor() {
-  cursor.style.left = mouseX + 'px';
-  cursor.style.top = mouseY + 'px';
-  cursor.style.display = 'block';
+  cursor.style.left = state.mouseX + 'px';
+  cursor.style.top = state.mouseY + 'px';
 }
 
-// Simulate mouse click at cursor position
-function simulateClick(isRightClick = false) {
-  const elementsAtPoint = document.elementsFromPoint(mouseX, mouseY);
-  const targetElement = elementsAtPoint[1] || elementsAtPoint[0]; // Skip cursor itself
+// ==========================================
+// CLICK SIMULATION - PROPERLY IMPLEMENTED
+// ==========================================
+
+function simulateClick(rightClick = false) {
+  // Get all elements at cursor position
+  const elements = document.elementsFromPoint(state.mouseX, state.mouseY);
+  const target = elements.find(el => el !== cursor) || elements[0];
   
-  if (targetElement) {
-    // Visual feedback
-    cursor.style.transform = 'translate(-50%, -50%) scale(1.5)';
-    setTimeout(() => {
-      cursor.style.transform = 'translate(-50%, -50%) scale(1)';
-    }, 150);
-    
-    // Create and dispatch mouse events
-    const eventType = isRightClick ? 'contextmenu' : 'click';
-    const mouseEvent = new MouseEvent(eventType, {
+  if (!target) return;
+  
+  // Visual feedback
+  cursor.style.transform = 'translate(-50%, -50%) scale(1.5)';
+  setTimeout(() => {
+    cursor.style.transform = 'translate(-50%, -50%) scale(1)';
+  }, 150);
+  
+  // Create proper mouse events
+  const events = rightClick 
+    ? ['mousedown', 'mouseup', 'contextmenu']
+    : ['mousedown', 'mouseup', 'click'];
+  
+  events.forEach(eventType => {
+    const evt = new MouseEvent(eventType, {
       bubbles: true,
       cancelable: true,
       view: window,
-      clientX: mouseX,
-      clientY: mouseY,
-      button: isRightClick ? 2 : 0
+      clientX: state.mouseX,
+      clientY: state.mouseY,
+      button: rightClick ? 2 : 0,
+      buttons: rightClick ? 2 : 1
     });
-    
-    targetElement.dispatchEvent(mouseEvent);
-    
-    // Also try direct click for certain elements
-    if (!isRightClick && targetElement.click) {
-      targetElement.click();
-    }
-    
-    showNotification(isRightClick ? '🖱️ Right Click' : '🖱️ Click');
+    target.dispatchEvent(evt);
+  });
+  
+  // For left click, also trigger native click on clickable elements
+  if (!rightClick && (target.tagName === 'BUTTON' || target.tagName === 'A' || target.onclick)) {
+    target.click?.();
   }
+  
+  notify(rightClick ? '🖱️ Right Click' : '🖱️ Click');
 }
 
-// Find the active video/audio element on the page
-function findMediaElement() {
-  // Try to find visible video elements first
+// ==========================================
+// MEDIA CONTROL
+// ==========================================
+
+function findMedia() {
+  // Find visible video first
   const videos = Array.from(document.querySelectorAll('video'));
-  const visibleVideo = videos.find(v => {
+  const visible = videos.find(v => {
     const rect = v.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0 && v.readyState >= 2;
   });
   
-  if (visibleVideo) return visibleVideo;
-  
-  // Fallback to any video or audio
-  return document.querySelector('video, audio');
+  return visible || document.querySelector('video, audio');
 }
 
-// Execute actions based on button presses
-function executeAction(action) {
-  const media = findMediaElement();
+function adjustPlaybackSpeed(lt, rt) {
+  const media = findMedia();
+  if (!media) return;
   
-  switch(action) {
-    case 'playPause':
-      if (media) {
-        if (media.paused) {
-          media.play();
-          showNotification('▶ Playing');
-        } else {
-          media.pause();
-          showNotification('⏸ Paused');
-        }
-      }
-      break;
-      
-    case 'mute':
-      if (media) {
-        media.muted = !media.muted;
-        showNotification(media.muted ? '🔇 Muted' : '🔊 Unmuted');
-      }
-      break;
-      
-    case 'volumeUp':
-      if (media) {
-        media.volume = Math.min(1, media.volume + 0.1);
-        showNotification(`🔊 Volume: ${Math.round(media.volume * 100)}%`);
-      }
-      break;
-      
-    case 'volumeDown':
-      if (media) {
-        media.volume = Math.max(0, media.volume - 0.1);
-        showNotification(`🔉 Volume: ${Math.round(media.volume * 100)}%`);
-      }
-      break;
-      
-    case 'forward':
-      if (media && !isNaN(media.duration)) {
-        media.currentTime = Math.min(media.duration, media.currentTime + 10);
-        showNotification('⏩ +10s');
-      }
-      break;
-      
-    case 'rewind':
-      if (media && !isNaN(media.duration)) {
-        media.currentTime = Math.max(0, media.currentTime - 10);
-        showNotification('⏪ -10s');
-      }
-      break;
-      
-    case 'skipForward':
-      if (media && !isNaN(media.duration)) {
-        media.currentTime = Math.min(media.duration, media.currentTime + 30);
-        showNotification('⏭ +30s');
-      }
-      break;
-      case 'goBack':
-      // Go back in browser history
-      window.history.back();
-      showNotification('⬅️ Back');
-      break;
-    case 'fullscreen':
-      if (media) {
-        if (!document.fullscreenElement) {
-          if (media.requestFullscreen) {
-            media.requestFullscreen();
-            showNotification('⛶ Fullscreen');
-          }
-        } else {
-          if (document.exitFullscreen) {
-            document.exitFullscreen();
-            showNotification('⛶ Exit Fullscreen');
-          }
-        }
-      }
-      break;
-      
-    case 'nextVideo':
-      // Try to find and click next button (YouTube, Netflix, etc.)
-      const nextButtons = [
-        '.ytp-next-button',  // YouTube
-        'button[data-uia="next-episode-seamless-button"]',  // Netflix
-        '.player-controls__right-control-group button:last-child'  // Twitch
-      ];
-      
-      for (const selector of nextButtons) {
-        const btn = document.querySelector(selector);
-        if (btn) {
-          btn.click();
-          showNotification('⏭ Next');
-          break;
-        }
-      }
-      break;
-      
-    case 'previousVideo':
-      // Try to find and click previous button
-      const prevButtons = [
-        '.ytp-prev-button',  // YouTube (not common)
-        'button[data-uia="previous-episode-button"]',  // Netflix
-      ];
-      
-      for (const selector of prevButtons) {
-        const btn = document.querySelector(selector);
-        if (btn) {
-          btn.click();
-          showNotification('⏮ Previous');
-          break;
-        }
-      }
-      break;
-      
-    case 'leftClick':
-      simulateClick(false); // false = left click
-      break;
-      
-    case 'rightClick':
-      simulateClick(true); // true = right click
-      break;
-      
+  let speed = 1.0;
+  
+  if (rt > CONFIG.triggerDeadzone) {
+    speed = 1.0 + rt; // 1x to 2x
+  } else if (lt > CONFIG.triggerDeadzone) {
+    speed = 1.0 - (lt * 0.75); // 1x to 0.25x
+  }
+  
+  // Only update if changed significantly
+  if (Math.abs(speed - state.playbackSpeed) > 0.05) {
+    state.playbackSpeed = speed;
+    media.playbackRate = speed;
     
+    // Occasional notification (not every frame)
+    if (Math.random() < 0.05) {
+      notify(`⚡ ${speed.toFixed(2)}x`);
+    }
   }
 }
 
-// Show on-screen notification
-function showNotification(text) {
-  // Remove existing notification
-  const existing = document.getElementById('gamepad-notification');
-  if (existing) existing.remove();
+// ==========================================
+// ACTION HANDLERS
+// ==========================================
+
+const ACTIONS = {
+  playPause: () => {
+    const m = findMedia();
+    if (!m) return;
+    if (m.paused) {
+      m.play();
+      notify('▶ Play');
+    } else {
+      m.pause();
+      notify('⏸ Pause');
+    }
+  },
   
-  const notification = document.createElement('div');
-  notification.id = 'gamepad-notification';
-  notification.textContent = text;
-  notification.style.cssText = `
+  mute: () => {
+    const m = findMedia();
+    if (!m) return;
+    m.muted = !m.muted;
+    notify(m.muted ? '🔇 Muted' : '🔊 Unmuted');
+  },
+  
+  volumeUp: () => {
+    const m = findMedia();
+    if (!m) return;
+    m.volume = Math.min(1, m.volume + 0.1);
+    notify(`🔊 ${Math.round(m.volume * 100)}%`);
+  },
+  
+  volumeDown: () => {
+    const m = findMedia();
+    if (!m) return;
+    m.volume = Math.max(0, m.volume - 0.1);
+    notify(`🔉 ${Math.round(m.volume * 100)}%`);
+  },
+  
+  forward: () => {
+    const m = findMedia();
+    if (!m || isNaN(m.duration)) return;
+    m.currentTime = Math.min(m.duration, m.currentTime + 10);
+    notify('⏩ +10s');
+  },
+  
+  rewind: () => {
+    const m = findMedia();
+    if (!m || isNaN(m.duration)) return;
+    m.currentTime = Math.max(0, m.currentTime - 10);
+    notify('⏪ -10s');
+  },
+  
+  fullscreen: () => {
+    const m = findMedia();
+    if (!m) return;
+    if (!document.fullscreenElement) {
+      m.requestFullscreen?.();
+      notify('⛶ Fullscreen');
+    } else {
+      document.exitFullscreen?.();
+      notify('⛶ Exit');
+    }
+  },
+  
+  goBack: () => {
+    history.back();
+    notify('⬅️ Back');
+  },
+  
+  nextVideo: () => {
+    // Site-specific next buttons
+    const selectors = [
+      '.ytp-next-button',
+      'button[data-uia="next-episode-seamless-button"]',
+      '.player-controls__right-control-group button:last-child'
+    ];
+    
+    for (const sel of selectors) {
+      const btn = document.querySelector(sel);
+      if (btn) {
+        btn.click();
+        notify('⏭️ Next');
+        return;
+      }
+    }
+  },
+  
+  previousVideo: () => {
+    const selectors = [
+      '.ytp-prev-button',
+      'button[data-uia="previous-episode-button"]'
+    ];
+    
+    for (const sel of selectors) {
+      const btn = document.querySelector(sel);
+      if (btn) {
+        btn.click();
+        notify('⏮️ Previous');
+        return;
+      }
+    }
+  },
+  
+  leftClick: () => simulateClick(false),
+  rightClick: () => simulateClick(true),
+  none: () => {} // Disabled action
+};
+
+// ==========================================
+// NOTIFICATION SYSTEM
+// ==========================================
+
+function notify(text) {
+  // Remove old notification
+  document.getElementById('gp-notify')?.remove();
+  
+  const n = document.createElement('div');
+  n.id = 'gp-notify';
+  n.textContent = text;
+  n.style.cssText = `
     position: fixed;
     top: 20px;
     right: 20px;
-    background: rgba(0, 0, 0, 0.8);
+    background: rgba(0,0,0,0.85);
     color: white;
-    padding: 15px 25px;
-    border-radius: 10px;
-    font-size: 18px;
-    font-weight: bold;
-    z-index: 999999;
+    padding: 12px 20px;
+    border-radius: 8px;
+    font: bold 16px sans-serif;
+    z-index: 2147483647;
     backdrop-filter: blur(10px);
-    border: 2px solid rgba(255, 255, 255, 0.2);
-    animation: slideIn 0.3s ease-out;
+    border: 2px solid rgba(255,255,255,0.2);
+    animation: slideIn 0.3s ease;
   `;
   
-  document.body.appendChild(notification);
+  document.body?.appendChild(n);
   
   setTimeout(() => {
-    notification.style.animation = 'slideOut 0.3s ease-out';
-    setTimeout(() => notification.remove(), 300);
+    n.style.animation = 'slideOut 0.3s ease';
+    setTimeout(() => n.remove(), 300);
   }, 1500);
 }
-// Smoothly adjust video playback speed based on trigger pressure
-function adjustPlaybackSpeed(leftTrigger, rightTrigger) {
-  const media = findMediaElement();
-  if (!media) return; // No video found, do nothing
-  
-  let targetSpeed = 1.0; // Default normal speed
-  
-  // Right trigger speeds up (1.0x to 2.0x)
-  if (rightTrigger > triggerDeadzone) {
-    targetSpeed = 1.0 + (rightTrigger * 1.0); // 0% = 1.0x, 100% = 2.0x
-  }
-  
-  // Left trigger slows down (0.25x to 1.0x)
-  // Only if right trigger isn't being used
-  if (leftTrigger > triggerDeadzone && rightTrigger <= triggerDeadzone) {
-    targetSpeed = 1.0 - (leftTrigger * 0.75); // 0% = 1.0x, 100% = 0.25x
-  }
-  
-  // Only update if speed actually changed significantly
-  if (Math.abs(targetSpeed - currentPlaybackSpeed) > 0.05) {
-    currentPlaybackSpeed = targetSpeed;
-    media.playbackRate = targetSpeed;
-    
-    // Show notification occasionally (not every frame, too spammy)
-    if (Math.random() < 0.05) { // 5% chance = smooth occasional updates
-      showNotification(`⚡ Speed: ${targetSpeed.toFixed(2)}x`);
+
+// Add animation styles
+if (!document.getElementById('gp-styles')) {
+  const style = document.createElement('style');
+  style.id = 'gp-styles';
+  style.textContent = `
+    @keyframes slideIn {
+      from { transform: translateX(400px); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
     }
-  }
+    @keyframes slideOut {
+      from { transform: translateX(0); opacity: 1; }
+      to { transform: translateX(400px); opacity: 0; }
+    }
+  `;
+  document.head?.appendChild(style);
 }
 
-// Add CSS animations
-const style = document.createElement('style');
-style.textContent = `
-  @keyframes slideIn {
-    from {
-      transform: translateX(400px);
-      opacity: 0;
-    }
-    to {
-      transform: translateX(0);
-      opacity: 1;
-    }
-  }
-  
-  @keyframes slideOut {
-    from {
-      transform: translateX(0);
-      opacity: 1;
-    }
-    to {
-      transform: translateX(400px);
-      opacity: 0;
-    }
-  }
-`;
-document.head.appendChild(style);
+// ==========================================
+// GAMEPAD POLLING LOOP
+// ==========================================
 
-// Poll for gamepad input
-function pollGamepad() {
-  if (!isEnabled) {
-    requestAnimationFrame(pollGamepad);
+function poll() {
+  if (!state.enabled) {
+    requestAnimationFrame(poll);
     return;
   }
   
   const gamepads = navigator.getGamepads();
-  const gamepad = gamepads[0] || gamepads[1] || gamepads[2] || gamepads[3];
+  const gp = gamepads[0] || gamepads[1] || gamepads[2] || gamepads[3];
   
-  if (gamepad) {
-    // Check buttons
-    gamepad.buttons.forEach((button, index) => {
-      const wasPressed = lastButtonStates[index];
-      const isPressed = button.pressed;
+  if (gp) {
+    // Handle buttons
+    gp.buttons.forEach((btn, i) => {
+      const wasPressed = state.lastButtons[i];
+      const isPressed = btn.pressed;
       
-      // Button just pressed (edge detection)
+      // Edge detection - only on button press
       if (isPressed && !wasPressed) {
-        const action = buttonMap[index];
-        if (action) {
-          executeAction(action);
-        }
+        const action = customMap[i] || DEFAULT_MAP[i];
+        ACTIONS[action]?.();
       }
       
-      lastButtonStates[index] = isPressed;
+      state.lastButtons[i] = isPressed;
     });
-    // Read trigger values (most controllers use buttons 6 and 7)
-    const leftTrigger = gamepad.buttons[6] ? gamepad.buttons[6].value : 0;
-    const rightTrigger = gamepad.buttons[7] ? gamepad.buttons[7].value : 0;
     
-    // Adjust playback speed based on triggers
-    adjustPlaybackSpeed(leftTrigger, rightTrigger);
-    // Handle analog sticks for scrolling
-    const leftStickY = gamepad.axes[1]; // Left stick vertical
-    const rightStickX = gamepad.axes[2]; // Right stick horizontal
-    const rightStickY = gamepad.axes[3]; // Right stick vertical
+    // Get axes and triggers
+    const [lsX, lsY, rsX, rsY] = gp.axes;
+    const lt = gp.buttons[6]?.value || 0;
+    const rt = gp.buttons[7]?.value || 0;
     
-    // Left stick for scrolling
-    if (Math.abs(leftStickY) > 0.2) {
-      window.scrollBy(0, leftStickY * scrollSpeed);
+    // Playback speed control
+    adjustPlaybackSpeed(lt, rt);
+    
+    // Left stick - scroll page
+    if (Math.abs(lsY) > CONFIG.stickDeadzone) {
+      window.scrollBy(0, lsY * CONFIG.scrollSpeed);
     }
     
-    // Right stick for mouse cursor control
-    if (Math.abs(rightStickX) > 0.15 || Math.abs(rightStickY) > 0.15) {
-      mouseX += rightStickX * cursorSpeed;
-      mouseY += rightStickY * cursorSpeed;
+    // Right stick - cursor control
+    if (Math.abs(rsX) > CONFIG.stickDeadzone || Math.abs(rsY) > CONFIG.stickDeadzone) {
+      state.mouseX += rsX * CONFIG.cursorSpeed;
+      state.mouseY += rsY * CONFIG.cursorSpeed;
       
-      // Keep cursor within screen bounds
-      mouseX = Math.max(0, Math.min(window.innerWidth, mouseX));
-      mouseY = Math.max(0, Math.min(window.innerHeight, mouseY));
+      // Clamp to screen
+      state.mouseX = Math.max(0, Math.min(window.innerWidth, state.mouseX));
+      state.mouseY = Math.max(0, Math.min(window.innerHeight, state.mouseY));
       
       updateCursor();
     }
   }
   
-  requestAnimationFrame(pollGamepad);
+  requestAnimationFrame(poll);
 }
 
-// Listen for enable/disable messages
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === 'toggleEnabled') {
-    isEnabled = request.enabled;
-    cursor.style.display = isEnabled ? 'block' : 'none';
-    showNotification(isEnabled ? '🎮 Gamepad Enabled' : '🎮 Gamepad Disabled');
+// ==========================================
+// MESSAGE HANDLING
+// ==========================================
+
+chrome.runtime.onMessage.addListener((msg, sender, respond) => {
+  if (msg.action === 'toggle') {
+    state.enabled = msg.enabled;
+    cursor.style.display = msg.enabled ? 'block' : 'none';
+    notify(msg.enabled ? '🎮 Enabled' : '🎮 Disabled');
   }
+  
+  if (msg.action === 'updateMap') {
+    customMap = msg.map;
+    notify('⚙️ Controls Updated');
+  }
+  
+  if (msg.action === 'resetMap') {
+    customMap = {};
+    notify('🔄 Reset');
+  }
+  
+  respond({ ok: true });
+  return true;
 });
 
-// Start polling
-console.log('Gamepad Browser Controller loaded');
+// ==========================================
+// INITIALIZATION
+// ==========================================
 
-pollGamepad();
-
+chrome.storage.local.get(['enabled', 'customMap'], (data) => {
+  state.enabled = data.enabled !== false;
+  customMap = data.customMap || {};
+  cursor.style.display = state.enabled ? 'block' : 'none';
+  console.log('🎮 Gamepad Controller loaded');
+  poll();
+});
