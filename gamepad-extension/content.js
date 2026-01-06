@@ -1,22 +1,21 @@
-// ===============================lets get this started 
+// ===============================
+// content.js just making it as smooth as it can be
 // ===============================
 
-// Cursor state
 let cursor;
 let cursorX = window.innerWidth / 2;
 let cursorY = window.innerHeight / 2;
-let lastX = cursorX;
-let lastY = cursorY;
 
-// Create cursor element
 function createCursor() {
+  if (cursor) return;
+
   cursor = document.createElement("div");
-  cursor.id = "gamepad-virtual-cursor";
+  cursor.id = "gamepad-cursor";
 
   Object.assign(cursor.style, {
     position: "fixed",
-    width: "14px",
-    height: "14px",
+    width: "12px",
+    height: "12px",
     borderRadius: "50%",
     background: "white",
     border: "2px solid black",
@@ -29,44 +28,110 @@ function createCursor() {
   document.body.appendChild(cursor);
 }
 
-// Move cursor (GPU-only)
-function moveCursor(x, y) {
-  if (x === lastX && y === lastY) return; // CHANGE DETECTION
+function moveCursor(dx, dy) {
+  if (!cursor) createCursor();
 
-  lastX = x;
-  lastY = y;
+  cursorX += dx;
+  cursorY += dy;
 
-  cursor.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+  cursorX = Math.max(0, Math.min(window.innerWidth, cursorX));
+  cursorY = Math.max(0, Math.min(window.innerHeight, cursorY));
+
+  cursor.style.transform = `translate3d(${cursorX}px, ${cursorY}px, 0)`;
 }
 
-// Handle incoming messages
+function click(type = "left") {
+  const el = document.elementFromPoint(cursorX, cursorY);
+  if (!el) return;
+
+  const button = type === "right" ? 2 : 0;
+
+  ["mousedown", "mouseup", "click"].forEach(evt =>
+    el.dispatchEvent(
+      new MouseEvent(evt, {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        button
+      })
+    )
+  );
+}
+
+function scroll(amount) {
+  window.scrollBy(0, amount);
+}
+
+// Media helpers
+function togglePlay() {
+  document.querySelector("video")?.paused
+    ? document.querySelector("video")?.play()
+    : document.querySelector("video")?.pause();
+}
+
+function seek(seconds) {
+  const v = document.querySelector("video");
+  if (v) v.currentTime += seconds;
+}
+
+function changeSpeed(delta) {
+  const v = document.querySelector("video");
+  if (!v) return;
+  v.playbackRate = Math.min(2, Math.max(0.25, v.playbackRate + delta));
+}
+
+function volume(delta) {
+  const v = document.querySelector("video");
+  if (!v) return;
+  v.volume = Math.min(1, Math.max(0, v.volume + delta));
+}
+
+function fullscreen() {
+  const v = document.querySelector("video");
+  if (!v) return;
+  document.fullscreenElement ? document.exitFullscreen() : v.requestFullscreen();
+}
+
 chrome.runtime.onMessage.addListener((msg) => {
-  if (msg.type === "INIT_CURSOR") {
-    if (!cursor) createCursor();
-  }
+  switch (msg.type) {
+    case "CURSOR":
+      moveCursor(msg.dx, msg.dy);
+      break;
 
-  if (msg.type === "MOVE_CURSOR") {
-    cursorX = Math.max(0, Math.min(window.innerWidth, cursorX + msg.dx));
-    cursorY = Math.max(0, Math.min(window.innerHeight, cursorY + msg.dy));
-    moveCursor(cursorX, cursorY);
-  }
+    case "SCROLL":
+      scroll(msg.amount);
+      break;
 
-  if (msg.type === "CLICK") {
-    const el = document.elementFromPoint(cursorX, cursorY);
-    if (!el) return;
+    case "LEFT_CLICK":
+      click("left");
+      break;
 
-    el.dispatchEvent(
-      new MouseEvent("mousedown", { bubbles: true })
-    );
-    el.dispatchEvent(
-      new MouseEvent("mouseup", { bubbles: true })
-    );
-    el.dispatchEvent(
-      new MouseEvent("click", { bubbles: true })
-    );
-  }
+    case "RIGHT_CLICK":
+      click("right");
+      break;
 
-  if (msg.type === "SCROLL") {
-    window.scrollBy(0, msg.amount);
+    case "PLAY_PAUSE":
+      togglePlay();
+      break;
+
+    case "SEEK":
+      seek(msg.amount);
+      break;
+
+    case "SPEED":
+      changeSpeed(msg.amount);
+      break;
+
+    case "VOLUME":
+      volume(msg.amount);
+      break;
+
+    case "FULLSCREEN":
+      fullscreen();
+      break;
+
+    case "BACK":
+      history.back();
+      break;
   }
 });
