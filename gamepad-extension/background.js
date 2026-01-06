@@ -1,5 +1,3 @@
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.set({
-    enabled: true
-  });
+  chrome.storage.local.set({ enabled: true });
 });
