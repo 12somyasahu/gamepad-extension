@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Gamepad Browser Controller",
-  "version": "2.0",
-  "description": "Smooth, configurable gamepad control for the browser",
+  "version": "3.0",
+  "description": "Ultra-smooth gamepad control using native keyboard + mouse",
   "permissions": ["storage", "activeTab"],
   "background": {
     "service_worker": "background.js"
@@ -16,10 +16,5 @@
   ],
   "action": {
     "default_popup": "popup.html"
-  },
-  "icons": {
-    "16": "icon16.png",
-    "48": "icon48.png",
-    "128": "icon128.png"
   }
 }
