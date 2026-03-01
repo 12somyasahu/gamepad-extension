@@ -1,5 +1,5 @@
-// content.js - Main gamepad controller logic
-// Runs on every page to handle gamepad input
+//   Main gamepad controller logic
+// big dawggggg
 
 (function () {
   'use strict';
@@ -55,6 +55,7 @@
   let prevButtons = [];
   let rafId = null;
   let active = false;
+  let enabled = true; // contlled by popup toggle
 
   // ─── Cursor Element ──────────────────────────────────────────────────────────
 
@@ -178,7 +179,7 @@
     }
   }
 
-  // ─── Trigger Speed Control ────────────────────────────────────────────────────
+  // ─── Trigger Speed Control pew pew ────────────────────────────────────────────────────
 
   function handleTriggers(gp) {
     const video = getVideo();
@@ -197,6 +198,14 @@
   // ─── Main Loop ────────────────────────────────────────────────────────────────
 
   function gameLoop() {
+    if (!enabled) {
+      // Hide cursor when disabled
+      if (cursor) cursor.style.display = 'none';
+      prevButtons = [];
+      rafId = requestAnimationFrame(gameLoop);
+      return;
+    }
+
     const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
     const gp = Array.from(gamepads).find(g => g && g.connected);
 
@@ -248,19 +257,23 @@
   // ─── Load Mappings & Start ────────────────────────────────────────────────────
 
   function start() {
-    chrome.storage.sync.get('mappings', (data) => {
+    chrome.storage.sync.get(['mappings', 'enabled'], (data) => {
       if (data.mappings) {
         // Merge saved mappings over defaults
         mappings = { ...DEFAULT_MAPPINGS, ...data.mappings };
       }
+      enabled = data.enabled !== false; // default ON
       rafId = requestAnimationFrame(gameLoop);
     });
   }
 
-  // Listen for mapping updates from popup
+  // Listen for mapping updates and enable/disable from popup
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type === 'updateMappings') {
       mappings = { ...DEFAULT_MAPPINGS, ...msg.mappings };
+    }
+    if (msg.type === 'setEnabled') {
+      enabled = msg.enabled;
     }
   });
 
