@@ -1,4 +1,4 @@
-// popup.js — Settings UI logic
+// UI settings 
 
 const DEFAULT_MAPPINGS = {
   0:  'playPause',
@@ -50,7 +50,37 @@ const ACTIONS = {
   nothing:     '(Disabled)',
 };
 
-// ─── Tabs ─────────────────────────────────────────────────────────────────────
+// ─── Enable / Disable Toggle ──────────────────────────────────────────────────
+
+const enableToggle = document.getElementById('enableToggle');
+const toggleLabel = document.getElementById('toggleLabel');
+const disabledOverlay = document.getElementById('disabledOverlay');
+
+function applyEnabledState(enabled) {
+  enableToggle.checked = enabled;
+  toggleLabel.textContent = enabled ? 'ON' : 'OFF';
+  toggleLabel.className = 'toggle-label' + (enabled ? ' on' : '');
+  disabledOverlay.className = 'disabled-overlay' + (enabled ? '' : ' show');
+}
+
+// Load saved state
+chrome.storage.sync.get('enabled', (data) => {
+  const enabled = data.enabled !== false; // default ON
+  applyEnabledState(enabled);
+});
+
+enableToggle.addEventListener('change', () => {
+  const enabled = enableToggle.checked;
+  applyEnabledState(enabled);
+  chrome.storage.sync.set({ enabled });
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    if (tabs[0]) {
+      chrome.tabs.sendMessage(tabs[0].id, { type: 'setEnabled', enabled });
+    }
+  });
+});
+
+
 
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
