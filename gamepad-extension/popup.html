@@ -48,7 +48,6 @@
     .logo span { color: var(--accent); }
 
     .status-dot {
-      margin-left: auto;
       width: 8px;
       height: 8px;
       border-radius: 50%;
@@ -63,6 +62,82 @@
       font-family: 'Space Mono', monospace;
     }
     .status-label.connected { color: var(--success); }
+
+    /* Power toggle */
+    .power-toggle {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .toggle-switch {
+      position: relative;
+      width: 38px;
+      height: 20px;
+      cursor: pointer;
+    }
+    .toggle-switch input { display: none; }
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      border-radius: 20px;
+      background: var(--border);
+      transition: background 0.25s;
+    }
+    .toggle-thumb {
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: transform 0.25s, background 0.25s;
+    }
+    .toggle-switch input:checked ~ .toggle-track { background: #1e3a2a; }
+    .toggle-switch input:checked ~ .toggle-track .toggle-thumb {
+      transform: translateX(18px);
+      background: var(--success);
+      box-shadow: 0 0 6px var(--success);
+    }
+
+    .toggle-label {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      color: var(--muted);
+      transition: color 0.2s;
+    }
+    .toggle-label.on { color: var(--success); }
+
+    /* Disabled overlay */
+    .disabled-overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: rgba(14, 14, 18, 0.65);
+      backdrop-filter: blur(2px);
+      z-index: 10;
+      border-radius: 0 0 4px 4px;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .disabled-overlay.show { display: flex; }
+    .disabled-overlay-icon { font-size: 28px; opacity: 0.4; }
+    .disabled-overlay-text {
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.5px;
+    }
+
+    .body-wrap {
+      position: relative;
+    }
 
     /* Tabs */
     .tabs {
@@ -93,7 +168,7 @@
     .panel { display: none; padding: 14px 16px; }
     .panel.active { display: block; }
 
-    /* Cheatsheet */
+    /* Cheaheet */
     .section-title {
       font-family: 'Space Mono', monospace;
       font-size: 10px;
@@ -225,7 +300,22 @@
   <div class="logo">🎮 <span>GAMEPAD</span> CTRL</div>
   <span class="status-label" id="statusLabel">No controller</span>
   <div class="status-dot" id="statusDot"></div>
+  <div class="power-toggle" style="margin-left:12px;">
+    <span class="toggle-label" id="toggleLabel">OFF</span>
+    <label class="toggle-switch" title="Enable / Disable extension">
+      <input type="checkbox" id="enableToggle" />
+      <div class="toggle-track">
+        <div class="toggle-thumb"></div>
+      </div>
+    </label>
+  </div>
 </header>
+
+<div class="body-wrap">
+<div class="disabled-overlay" id="disabledOverlay">
+  <div class="disabled-overlay-icon">🎮</div>
+  <div class="disabled-overlay-text">Controller disabled</div>
+</div>
 
 <div class="tabs">
   <div class="tab active" data-tab="info">Controls</div>
@@ -279,6 +369,8 @@
     <button class="btn-reset" id="resetBtn">🔄 Reset</button>
   </div>
 </div>
+
+</div><!-- /.body-shawarmawrap -->
 
 <div class="toast" id="toast">Saved!</div>
 
