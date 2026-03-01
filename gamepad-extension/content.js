@@ -10,26 +10,28 @@
   const CURSOR_SPEED = 12;
   const SCROLL_SPEED = 8;
   const CLICK_FLASH_MS = 150;
+  const MISSING_THRESHOLD = 5;
 
-  // Default button-to-action mappings (index = gamepad button index)
+  // Polling rate: rAF (~60fps) when there is active input, slow timeout when idle
+  const IDLE_POLL_MS = 50; // ~20fps when nothing is happening
+
   const DEFAULT_MAPPINGS = {
-    0:  'playPause',       // A / Cross
-    1:  'back',            // B / Circle
-    2:  'mute',            // X / Square
-    3:  'fullscreen',      // Y / Triangle
-    4:  'prevTrack',       // LB
-    5:  'nextTrack',       // RB
-    8:  'nothing',         // Select / Share
-    9:  'nothing',         // Start / Options
-    10: 'leftClick',       // L3
-    11: 'rightClick',      // R3
-    12: 'volumeUp',        // D-Pad Up
-    13: 'volumeDown',      // D-Pad Down
-    14: 'rewind10',        // D-Pad Left
-    15: 'forward10',       // D-Pad Right
+    0:  'playPause',
+    1:  'back',
+    2:  'mute',
+    3:  'fullscreen',
+    4:  'prevTrack',
+    5:  'nextTrack',
+    8:  'nothing',
+    9:  'nothing',
+    10: 'leftClick',
+    11: 'rightClick',
+    12: 'volumeUp',
+    13: 'volumeDown',
+    14: 'rewind10',
+    15: 'forward10',
   };
 
-  // All available actions
   const ACTIONS = {
     playPause:   'Play / Pause',
     back:        'Go Back',
@@ -53,29 +55,39 @@
   let cursorX = window.innerWidth / 2;
   let cursorY = window.innerHeight / 2;
   let prevButtons = [];
-  let rafId = null;
+  let timerId = null;
   let active = false;
-  let enabled = true; // contlled by popup toggle
+  let enabled = true;
+  let missingFrames = 0;
 
-  // ─── Cursor Element ──────────────────────────────────────────────────────────
+  // Cached video element — re-queried lazily, not every frame
+  let _videoCache = null;
+  let _videoCacheTime = 0;
+  const VIDEO_CACHE_MS = 2000;
+
+  function getVideo() {
+    const now = Date.now();
+    if (!_videoCache || now - _videoCacheTime > VIDEO_CACHE_MS) {
+      _videoCache = document.querySelector('video');
+      _videoCacheTime = now;
+    }
+    return _videoCache;
+  }
+
+  // ─── Cursor ──────────────────────────────────────────────────────────────────
 
   function createCursor() {
     if (cursor) return;
     cursor = document.createElement('div');
     cursor.id = '__gamepad_cursor__';
     cursor.style.cssText = `
-      position: fixed;
-      width: 20px;
-      height: 20px;
-      border-radius: 50%;
-      background: rgba(255, 80, 80, 0.85);
-      border: 2px solid white;
-      box-shadow: 0 0 10px rgba(255,80,80,0.6), 0 0 20px rgba(255,80,80,0.3);
-      pointer-events: none;
-      z-index: 2147483647;
-      transform: translate(-50%, -50%);
-      transition: transform 0.05s ease, box-shadow 0.1s ease;
-      display: none;
+      position:fixed;width:20px;height:20px;border-radius:50%;
+      background:rgba(255,80,80,0.85);border:2px solid white;
+      box-shadow:0 0 10px rgba(255,80,80,0.6),0 0 20px rgba(255,80,80,0.3);
+      pointer-events:none;z-index:2147483647;
+      transform:translate(-50%,-50%);
+      transition:transform 0.05s ease,box-shadow 0.1s ease;
+      display:none;will-change:left,top;
     `;
     document.body.appendChild(cursor);
   }
@@ -83,33 +95,79 @@
   function updateCursorPos() {
     if (!cursor) return;
     cursor.style.left = cursorX + 'px';
-    cursor.style.top = cursorY + 'px';
+    cursor.style.top  = cursorY + 'px';
     cursor.style.display = 'block';
+  }
+
+  function hideCursor() {
+    if (cursor) cursor.style.display = 'none';
   }
 
   function flashCursor() {
     if (!cursor) return;
-    cursor.style.transform = 'translate(-50%, -50%) scale(0.7)';
-    cursor.style.boxShadow = '0 0 20px rgba(255,255,255,0.9), 0 0 40px rgba(255,80,80,0.8)';
+    cursor.style.transform = 'translate(-50%,-50%) scale(0.7)';
+    cursor.style.boxShadow = '0 0 20px rgba(255,255,255,0.9),0 0 40px rgba(255,80,80,0.8)';
     setTimeout(() => {
       if (cursor) {
-        cursor.style.transform = 'translate(-50%, -50%) scale(1)';
-        cursor.style.boxShadow = '0 0 10px rgba(255,80,80,0.6), 0 0 20px rgba(255,80,80,0.3)';
+        cursor.style.transform = 'translate(-50%,-50%) scale(1)';
+        cursor.style.boxShadow = '0 0 10px rgba(255,80,80,0.6),0 0 20px rgba(255,80,80,0.3)';
       }
     }, CLICK_FLASH_MS);
   }
 
-  // ─── Actions ─────────────────────────────────────────────────────────────────
+  // ─── Next / Prev Track ───────────────────────────────────────────────────────
+  // Tries site-specific selectors first, then keyboard shortcuts as fallback.
 
-  function getVideo() {
-    return document.querySelector('video');
+  function tryNextTrack() {
+    const selectors = [
+      '.ytp-next-button',                               // YouTube
+      '[data-testid="next-episode-seamless-button"]',   // Netflix
+      '[data-a-target="player-skip-forward"]',          // Twitch
+      '[aria-label="Next"]',
+      '[aria-label="Next video"]',
+      '[aria-label="Next track"]',
+      '[aria-label="Skip to next"]',
+      '[title="Next"]',
+    ];
+    for (const sel of selectors) {
+      const el = document.querySelector(sel);
+      if (el) { el.click(); return; }
+    }
+    // Keyboard fallback: Shift+N (YouTube next in playlist / autoplay)
+    dispatchKey('n', { shiftKey: true });
   }
+
+  function tryPrevTrack() {
+    const selectors = [
+      '.ytp-prev-button',                               // YouTube
+      '[data-testid="previous-episode-button"]',        // Netflix
+      '[aria-label="Previous"]',
+      '[aria-label="Previous video"]',
+      '[aria-label="Previous track"]',
+      '[title="Previous"]',
+    ];
+    for (const sel of selectors) {
+      const el = document.querySelector(sel);
+      if (el) { el.click(); return; }
+    }
+    // Keyboard fallback: Shift+P (YouTube prev in playlist)
+    dispatchKey('p', { shiftKey: true });
+  }
+
+  function dispatchKey(key, opts = {}) {
+    const target = document.activeElement || document.body;
+    const base = { key, bubbles: true, cancelable: true, ...opts };
+    target.dispatchEvent(new KeyboardEvent('keydown', base));
+    target.dispatchEvent(new KeyboardEvent('keyup',   base));
+  }
+
+  // ─── Actions ─────────────────────────────────────────────────────────────────
 
   function doAction(action) {
     const video = getVideo();
     switch (action) {
       case 'playPause':
-        if (video) video.paused ? video.play() : video.pause();
+        if (video) { video.paused ? video.play() : video.pause(); }
         break;
       case 'back':
         history.back();
@@ -124,16 +182,8 @@
           document.exitFullscreen?.();
         }
         break;
-      case 'prevTrack':
-        // Try media session prev, or click previous button by aria-label
-        if (navigator.mediaSession?.setActionHandler) {
-          // trigger via clicking common prev buttons
-        }
-        clickByAria(['Previous', 'Previous video', 'Previous track', 'Prev', 'Back']);
-        break;
-      case 'nextTrack':
-        clickByAria(['Next', 'Next video', 'Next track', 'Autoplay next']);
-        break;
+      case 'prevTrack': tryPrevTrack(); break;
+      case 'nextTrack': tryNextTrack(); break;
       case 'volumeUp':
         if (video) video.volume = Math.min(1, video.volume + 0.1);
         break;
@@ -146,22 +196,8 @@
       case 'forward10':
         if (video) video.currentTime = Math.min(video.duration || Infinity, video.currentTime + 10);
         break;
-      case 'leftClick':
-        performClick(cursorX, cursorY, false);
-        break;
-      case 'rightClick':
-        performClick(cursorX, cursorY, true);
-        break;
-      case 'nothing':
-      default:
-        break;
-    }
-  }
-
-  function clickByAria(labels) {
-    for (const label of labels) {
-      const el = document.querySelector(`[aria-label="${label}"]`);
-      if (el) { el.click(); return; }
+      case 'leftClick':  performClick(cursorX, cursorY, false); break;
+      case 'rightClick': performClick(cursorX, cursorY, true);  break;
     }
   }
 
@@ -169,124 +205,142 @@
     flashCursor();
     const el = document.elementFromPoint(x, y);
     if (!el) return;
-    const eventType = rightClick ? 'contextmenu' : 'click';
     const opts = { bubbles: true, cancelable: true, clientX: x, clientY: y };
     el.dispatchEvent(new MouseEvent('mousedown', opts));
-    el.dispatchEvent(new MouseEvent('mouseup', opts));
-    el.dispatchEvent(new MouseEvent(eventType, opts));
+    el.dispatchEvent(new MouseEvent('mouseup',   opts));
+    el.dispatchEvent(new MouseEvent(rightClick ? 'contextmenu' : 'click', opts));
     if (!rightClick && el.tagName === 'A' && el.href) {
       window.location.href = el.href;
     }
   }
 
-  // ─── Trigger Speed Control pew pew ────────────────────────────────────────────────────
+  // ─── Triggers ────────────────────────────────────────────────────────────────
+
+  let lastPlaybackRate = 1;
 
   function handleTriggers(gp) {
-    const video = getVideo();
-    if (!video) return;
-    const lt = gp.buttons[6]?.value ?? 0; // LT
-    const rt = gp.buttons[7]?.value ?? 0; // RT
-    if (lt > DEADZONE) {
-      video.playbackRate = 1 - lt * 0.75; // 0.25x to 1x
-    } else if (rt > DEADZONE) {
-      video.playbackRate = 1 + rt;         // 1x to 2x
-    } else {
-      if (video.playbackRate !== 1) video.playbackRate = 1;
+    const lt = gp.buttons[6]?.value ?? 0;
+    const rt = gp.buttons[7]?.value ?? 0;
+
+    let target = 1;
+    if (lt > DEADZONE)      target = 1 - lt * 0.75; // 0.25x–1x
+    else if (rt > DEADZONE) target = 1 + rt;          // 1x–2x
+
+    // Only touch the DOM if playback rate actually changed
+    if (target !== lastPlaybackRate) {
+      const video = getVideo();
+      if (video) video.playbackRate = target;
+      lastPlaybackRate = target;
     }
   }
 
   // ─── Main Loop ────────────────────────────────────────────────────────────────
+  // Runs at rAF speed (~60fps) only when there is active input.
+  // Drops to IDLE_POLL_MS (~20fps) when the controller is idle to avoid jank.
+
+  function scheduleNext(hasInput) {
+    timerId = hasInput
+      ? requestAnimationFrame(gameLoop)
+      : setTimeout(gameLoop, IDLE_POLL_MS);
+  }
 
   function gameLoop() {
     if (!enabled) {
-      // Hide cursor when disabled
-      if (cursor) cursor.style.display = 'none';
+      hideCursor();
       prevButtons = [];
-      rafId = requestAnimationFrame(gameLoop);
+      missingFrames = 0;
+      timerId = setTimeout(gameLoop, IDLE_POLL_MS);
       return;
     }
 
     const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
     const gp = Array.from(gamepads).find(g => g && g.connected);
 
-    if (gp) {
-      if (!active) {
-        active = true;
-        createCursor();
+    if (!gp) {
+      missingFrames++;
+      if (missingFrames >= MISSING_THRESHOLD) {
+        hideCursor();
+        active = false;
+        prevButtons = [];
       }
-
-      // ── Analog sticks ──
-      const lx = applyDeadzone(gp.axes[0] || 0);
-      const ly = applyDeadzone(gp.axes[1] || 0);
-      const rx = applyDeadzone(gp.axes[2] || 0);
-      const ry = applyDeadzone(gp.axes[3] || 0);
-
-      // Left stick = scroll
-      window.scrollBy(lx * SCROLL_SPEED, ly * SCROLL_SPEED);
-
-      // Right stick = move cursor
-      if (rx !== 0 || ry !== 0) {
-        cursorX = Math.max(0, Math.min(window.innerWidth, cursorX + rx * CURSOR_SPEED));
-        cursorY = Math.max(0, Math.min(window.innerHeight, cursorY + ry * CURSOR_SPEED));
-        updateCursorPos();
-      }
-
-      // ── Triggers (analog speed) ──
-      handleTriggers(gp);
-
-      // ── Buttons (edge detection - only fire on press, not hold) ──
-      gp.buttons.forEach((btn, i) => {
-        const pressed = btn.pressed;
-        const wasPressed = prevButtons[i] || false;
-        if (pressed && !wasPressed) {
-          const action = mappings[i];
-          if (action) doAction(action);
-        }
-        prevButtons[i] = pressed;
-      });
+      timerId = setTimeout(gameLoop, IDLE_POLL_MS);
+      return;
     }
 
-    rafId = requestAnimationFrame(gameLoop);
+    missingFrames = 0;
+    if (!active) { active = true; createCursor(); }
+
+    // ── Analog sticks ──
+    const lx = applyDeadzone(gp.axes[0] || 0);
+    const ly = applyDeadzone(gp.axes[1] || 0);
+    const rx = applyDeadzone(gp.axes[2] || 0);
+    const ry = applyDeadzone(gp.axes[3] || 0);
+
+    // Guard: only call scrollBy when the stick is actually moving
+    if (lx !== 0 || ly !== 0) {
+      window.scrollBy(lx * SCROLL_SPEED, ly * SCROLL_SPEED);
+    }
+
+    if (rx !== 0 || ry !== 0) {
+      cursorX = Math.max(0, Math.min(window.innerWidth,  cursorX + rx * CURSOR_SPEED));
+      cursorY = Math.max(0, Math.min(window.innerHeight, cursorY + ry * CURSOR_SPEED));
+      updateCursorPos();
+    }
+
+    // ── Triggers ──
+    handleTriggers(gp);
+
+    // ── Buttons (for loop is faster than forEach + closure) ──
+    let anyPressed = false;
+    for (let i = 0; i < gp.buttons.length; i++) {
+      const pressed = gp.buttons[i].pressed;
+      if (pressed && !prevButtons[i]) {
+        const action = mappings[i];
+        if (action && action !== 'nothing') doAction(action);
+      }
+      if (pressed) anyPressed = true;
+      prevButtons[i] = pressed;
+    }
+
+    const lt = gp.buttons[6]?.value ?? 0;
+    const rt = gp.buttons[7]?.value ?? 0;
+    const hasInput = lx || ly || rx || ry || anyPressed || lt > DEADZONE || rt > DEADZONE;
+
+    scheduleNext(hasInput);
   }
 
   function applyDeadzone(val) {
-    if (Math.abs(val) < DEADZONE) return 0;
-    return val;
+    return Math.abs(val) < DEADZONE ? 0 : val;
   }
 
-  // ─── Load Mappings & Start ────────────────────────────────────────────────────
+  // ─── Init ────────────────────────────────────────────────────────────────────
 
   function start() {
     chrome.storage.sync.get(['mappings', 'enabled'], (data) => {
-      if (data.mappings) {
-        // Merge saved mappings over defaults
-        mappings = { ...DEFAULT_MAPPINGS, ...data.mappings };
-      }
-      enabled = data.enabled !== false; // default ON
-      rafId = requestAnimationFrame(gameLoop);
+      if (data.mappings) mappings = { ...DEFAULT_MAPPINGS, ...data.mappings };
+      enabled = data.enabled !== false;
+      timerId = setTimeout(gameLoop, IDLE_POLL_MS);
     });
   }
 
-  // Listen for mapping updates and enable/disable from popup
   chrome.runtime.onMessage.addListener((msg) => {
-    if (msg.type === 'updateMappings') {
-      mappings = { ...DEFAULT_MAPPINGS, ...msg.mappings };
-    }
-    if (msg.type === 'setEnabled') {
-      enabled = msg.enabled;
-    }
+    if (msg.type === 'updateMappings') mappings = { ...DEFAULT_MAPPINGS, ...msg.mappings };
+    if (msg.type === 'setEnabled')     enabled = msg.enabled;
   });
 
-  // Clean up cursor if tab hidden
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden && cursor) {
-      cursor.style.display = 'none';
-    }
+    if (document.hidden) hideCursor();
+  });
+
+  window.addEventListener('gamepaddisconnected', () => {
+    hideCursor();
+    active = false;
+    prevButtons = [];
+    missingFrames = MISSING_THRESHOLD;
   });
 
   start();
 
-  // Expose for debugging
   window.__gamepadController = { mappings, ACTIONS, DEFAULT_MAPPINGS };
 
 })();
