@@ -1,210 +1,287 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gamepad Controller</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    
+    @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Inter:wght@400;500;600&display=swap');
+
+    :root {
+      --bg: #0e0e12;
+      --surface: #18181f;
+      --border: #2a2a35;
+      --accent: #ff4d4d;
+      --accent2: #7c6fff;
+      --text: #e8e8f0;
+      --muted: #6b6b80;
+      --success: #3ddc84;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
-      width: 360px;
-      padding: 20px;
-      font-family: -apple-system, system-ui, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-    }
-    
-    h1 {
-      font-size: 20px;
-      margin-bottom: 15px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    
-    .status {
-      background: rgba(255,255,255,0.15);
-      padding: 12px;
-      border-radius: 8px;
-      margin-bottom: 12px;
-      backdrop-filter: blur(10px);
-      font-size: 14px;
-    }
-    
-    .status.on {
-      background: rgba(76,175,80,0.3);
-      border: 2px solid #4CAF50;
-    }
-    
-    .status.off {
-      background: rgba(244,67,54,0.3);
-      border: 2px solid #f44336;
-    }
-    
-    .ctrl-name {
-      font-size: 11px;
-      opacity: 0.8;
-      margin-top: 4px;
-    }
-    
-    button {
-      width: 100%;
-      padding: 12px;
-      border: none;
-      border-radius: 8px;
-      font-size: 15px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
-      margin-bottom: 10px;
-    }
-    
-    button:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-    }
-    
-    .btn-toggle {
-      background: #4CAF50;
-      color: white;
-    }
-    
-    .btn-toggle.off {
-      background: #f44336;
-    }
-    
-    .btn-secondary {
-      background: #FF9800;
-      color: white;
-    }
-    
-    .panel {
-      background: rgba(0,0,0,0.2);
-      padding: 15px;
-      border-radius: 8px;
-      margin-bottom: 12px;
-      display: none;
-    }
-    
-    .panel.show { display: block; }
-    
-    .panel h3 {
-      font-size: 15px;
-      margin-bottom: 10px;
-    }
-    
-    .remap-list {
-      max-height: 280px;
-      overflow-y: auto;
-    }
-    
-    .remap-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 8px 0;
-      border-bottom: 1px solid rgba(255,255,255,0.1);
+      width: 340px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
       font-size: 13px;
     }
-    
-    .remap-item:last-child { border: none; }
-    
-    select {
-      background: rgba(0,0,0,0.3);
-      color: white;
-      border: 1px solid rgba(255,255,255,0.3);
-      padding: 6px;
-      border-radius: 5px;
-      font-size: 12px;
-      cursor: pointer;
-    }
-    
-    .btn-group {
+
+    header {
+      background: linear-gradient(135deg, #1a1a24 0%, #0e0e12 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 16px;
       display: flex;
-      gap: 8px;
-      margin-top: 12px;
+      align-items: center;
+      gap: 10px;
     }
-    
-    .btn-group button {
+
+    .logo {
+      font-family: 'Space Mono', monospace;
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -0.5px;
+    }
+
+    .logo span { color: var(--accent); }
+
+    .status-dot {
+      margin-left: auto;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: background 0.3s;
+    }
+    .status-dot.connected { background: var(--success); box-shadow: 0 0 6px var(--success); }
+
+    .status-label {
+      font-size: 11px;
+      color: var(--muted);
+      font-family: 'Space Mono', monospace;
+    }
+    .status-label.connected { color: var(--success); }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    .tab {
       flex: 1;
       padding: 10px;
-      font-size: 13px;
-    }
-    
-    .map-list {
-      background: rgba(255,255,255,0.1);
-      padding: 12px;
-      border-radius: 8px;
-      max-height: 320px;
-      overflow-y: auto;
-    }
-    
-    .map-item {
-      display: flex;
-      justify-content: space-between;
-      padding: 6px 0;
-      border-bottom: 1px solid rgba(255,255,255,0.08);
-      font-size: 13px;
-    }
-    
-    .map-item:last-child { border: none; }
-    
-    .map-btn { opacity: 0.7; }
-    
-    .info {
-      background: rgba(255,255,255,0.1);
-      padding: 10px;
-      border-radius: 6px;
+      text-align: center;
+      cursor: pointer;
       font-size: 11px;
-      line-height: 1.4;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: var(--muted);
+      border-bottom: 2px solid transparent;
+      transition: color 0.2s, border-color 0.2s;
+      user-select: none;
+    }
+    .tab.active {
+      color: var(--text);
+      border-bottom-color: var(--accent);
+    }
+
+    .panel { display: none; padding: 14px 16px; }
+    .panel.active { display: block; }
+
+    /* Cheatsheet */
+    .section-title {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+      margin-top: 14px;
+    }
+    .section-title:first-child { margin-top: 0; }
+
+    .binding-list { display: flex; flex-direction: column; gap: 3px; }
+
+    .binding {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 8px;
+      border-radius: 6px;
+      background: var(--surface);
+    }
+
+    .btn-badge {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      font-weight: 700;
+      background: var(--border);
+      color: var(--text);
+      padding: 2px 6px;
+      border-radius: 4px;
+      white-space: nowrap;
+      min-width: 40px;
+      text-align: center;
+    }
+
+    .binding-action {
+      font-size: 12px;
+      color: #c0c0cc;
+    }
+
+    /* Customize */
+    .mapping-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .mapping-row label {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--muted);
+      width: 60px;
+      flex-shrink: 0;
+    }
+
+    select {
+      flex: 1;
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 5px 8px;
+      font-size: 12px;
+      font-family: 'Inter', sans-serif;
+      appearance: none;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+    select:focus {
+      outline: none;
+      border-color: var(--accent2);
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    button {
+      flex: 1;
+      padding: 8px;
+      border-radius: 7px;
+      border: none;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      font-family: 'Inter', sans-serif;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    button:active { transform: scale(0.97); }
+
+    .btn-save {
+      background: var(--accent);
+      color: white;
+    }
+    .btn-reset {
+      background: var(--border);
+      color: var(--text);
+    }
+    button:hover { opacity: 0.85; }
+
+    .toast {
+      position: fixed;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%) translateY(30px);
+      background: var(--success);
+      color: #000;
+      font-weight: 700;
+      font-size: 12px;
+      padding: 6px 14px;
+      border-radius: 20px;
+      opacity: 0;
+      transition: opacity 0.3s, transform 0.3s;
+      pointer-events: none;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
     }
   </style>
 </head>
 <body>
-  <h1>
-    <span style="font-size: 24px;">🎮</span>
-    Gamepad Controller
-  </h1>
-  
-  <div class="status" id="status">
-    <div id="statusText">Checking gamepad...</div>
-    <div class="ctrl-name" id="ctrlName"></div>
+
+<header>
+  <div class="logo">🎮 <span>GAMEPAD</span> CTRL</div>
+  <span class="status-label" id="statusLabel">No controller</span>
+  <div class="status-dot" id="statusDot"></div>
+</header>
+
+<div class="tabs">
+  <div class="tab active" data-tab="info">Controls</div>
+  <div class="tab" data-tab="customize">⚙️ Customize</div>
+</div>
+
+<!-- INFO PANEL -->
+<div class="panel active" id="panel-info">
+  <div class="section-title">Face Buttons</div>
+  <div class="binding-list">
+    <div class="binding"><span class="btn-badge">A / ✕</span><span class="binding-action">Play / Pause</span></div>
+    <div class="binding"><span class="btn-badge">B / ○</span><span class="binding-action">Go Back</span></div>
+    <div class="binding"><span class="btn-badge">X / □</span><span class="binding-action">Mute / Unmute</span></div>
+    <div class="binding"><span class="btn-badge">Y / △</span><span class="binding-action">Fullscreen</span></div>
   </div>
-  
-  <button class="btn-toggle" id="btnToggle">Disable</button>
-  <button class="btn-secondary" id="btnCustomize">⚙️ Customize Controls</button>
-  
-  <div class="panel" id="panelCustomize">
-    <h3>Remap Buttons</h3>
-    <div class="remap-list" id="remapList"></div>
-    <div class="btn-group">
-      <button style="background: #4CAF50;" id="btnSave">💾 Save</button>
-      <button style="background: #f44336;" id="btnReset">🔄 Reset</button>
-    </div>
+
+  <div class="section-title">Bumpers</div>
+  <div class="binding-list">
+    <div class="binding"><span class="btn-badge">LB</span><span class="binding-action">Previous Track</span></div>
+    <div class="binding"><span class="btn-badge">RB</span><span class="binding-action">Next Track</span></div>
   </div>
-  
-  <div class="map-list">
-    <div class="map-item"><span class="map-btn">A / Cross</span><span>Play/Pause</span></div>
-    <div class="map-item"><span class="map-btn">B / Circle</span><span>Go Back</span></div>
-    <div class="map-item"><span class="map-btn">X / Square</span><span>Mute</span></div>
-    <div class="map-item"><span class="map-btn">Y / Triangle</span><span>Fullscreen</span></div>
-    <div class="map-item"><span class="map-btn">LB</span><span>Previous</span></div>
-    <div class="map-item"><span class="map-btn">RB</span><span>Next</span></div>
-    <div class="map-item"><span class="map-btn">LT</span><span>Slow (0.25x-1x)</span></div>
-    <div class="map-item"><span class="map-btn">RT</span><span>Fast (1x-2x)</span></div>
-    <div class="map-item"><span class="map-btn">L3</span><span>Left Click</span></div>
-    <div class="map-item"><span class="map-btn">R3</span><span>Right Click</span></div>
-    <div class="map-item"><span class="map-btn">D-Up</span><span>Vol+</span></div>
-    <div class="map-item"><span class="map-btn">D-Down</span><span>Vol-</span></div>
-    <div class="map-item"><span class="map-btn">D-Left</span><span>-10s</span></div>
-    <div class="map-item"><span class="map-btn">D-Right</span><span>+10s</span></div>
-    <div class="map-item"><span class="map-btn">Left Stick</span><span>Scroll</span></div>
-    <div class="map-item"><span class="map-btn">Right Stick</span><span>Cursor</span></div>
+
+  <div class="section-title">Triggers (Analog)</div>
+  <div class="binding-list">
+    <div class="binding"><span class="btn-badge">LT</span><span class="binding-action">Slow down (0.25×–1×)</span></div>
+    <div class="binding"><span class="btn-badge">RT</span><span class="binding-action">Speed up (1×–2×)</span></div>
   </div>
-  
-  <div class="info">
-    💡 Works on YouTube, Netflix, Twitch, and all video sites. L3/R3 click to interact with any element!
+
+  <div class="section-title">D-Pad</div>
+  <div class="binding-list">
+    <div class="binding"><span class="btn-badge">↑</span><span class="binding-action">Volume Up</span></div>
+    <div class="binding"><span class="btn-badge">↓</span><span class="binding-action">Volume Down</span></div>
+    <div class="binding"><span class="btn-badge">←</span><span class="binding-action">Rewind 10s</span></div>
+    <div class="binding"><span class="btn-badge">→</span><span class="binding-action">Forward 10s</span></div>
   </div>
-  
-  <script src="popup.js"></script>
+
+  <div class="section-title">Sticks</div>
+  <div class="binding-list">
+    <div class="binding"><span class="btn-badge">L Stick</span><span class="binding-action">Scroll page</span></div>
+    <div class="binding"><span class="btn-badge">R Stick</span><span class="binding-action">Move cursor</span></div>
+    <div class="binding"><span class="btn-badge">L3</span><span class="binding-action">Left Click</span></div>
+    <div class="binding"><span class="btn-badge">R3</span><span class="binding-action">Right Click</span></div>
+  </div>
+</div>
+
+<!-- CUSTOMIZE PANEL -->
+<div class="panel" id="panel-customize">
+  <div id="mappingRows"></div>
+  <div class="btn-row">
+    <button class="btn-save" id="saveBtn">💾 Save</button>
+    <button class="btn-reset" id="resetBtn">🔄 Reset</button>
+  </div>
+</div>
+
+<div class="toast" id="toast">Saved!</div>
+
+<script src="popup.js"></script>
 </body>
 </html>
